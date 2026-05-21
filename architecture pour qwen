@@ -1,0 +1,846 @@
+# 🤖 Architecture — Dropshipping 100% Autonome (Node.js)
+
+> **Projet :** `autonomous-drop` — Plateforme e-commerce auto-pilotée, zéro intervention humaine  
+> **Stack :** Node.js 22 LTS · SQLite (better-sqlite3) · Express 5 · Mistral AI · Apify · Pollinations.ai
+
+---
+
+## 1. ARBORESCENCE COMPLÈTE
+
+```
+autonomous-drop/
+├── app.js                              ← Point d'entrée principal Express
+├── package.json
+├── .env.example
+├── .gitignore
+│
+├── config/
+│   ├── config.json                     ← Seuils, coefficients, feature flags globaux
+│   ├── scoring.json                    ← Seuils scoring produits (viral, demand, competition)
+│   ├── pricing.json                    ← Règles de marge par défaut
+│   ├── suppliers.json                  ← Priorités fournisseurs & fallback chain
+│   ├── seo.json                        ← Templates prompts Mistral, longueurs, langues
+│   ├── alerts.json                     ← Seuils d'alertes pricing et rentabilité
+│   └── database.js                     ← Initialisation SQLite, migrations, seed
+│
+├── db/
+│   ├── schema.sql                      ← DDL complet (CREATE TABLE + INDEX)
+│   ├── migrations/
+│   │   ├── 001_init.sql
+│   │   ├── 002_add_scoring.sql
+│   │   └── 003_add_analytics.sql
+│   └── autonomous-drop.sqlite          ← Fichier DB (gitignored)
+│
+├── modules/
+│   │
+│   ├── market-analysis/               ── MODULE 1 : Analyse Marché & Produits Gagnants
+│   │   ├── index.js                    ← Orchestrateur du module
+│   │   ├── scrapers/
+│   │   │   ├── tiktok.scraper.js       ← Scraping TikTok Shop via Apify
+│   │   │   ├── google-trends.scraper.js← Google Trends via npm package
+│   │   │   ├── instagram.scraper.js    ← Reels trending via Apify Actor
+│   │   │   └── pinterest.scraper.js    ← Pinterest trends via Apify Actor
+│   │   ├── scoring/
+│   │   │   ├── scorer.js               ← Calcul score_viral, score_demand, score_competition
+│   │   │   ├── weights.js              ← Pondérations configurables par signal source
+│   │   │   └── threshold.js            ← Lecture seuils depuis scoring.json
+│   │   ├── aggregator.js               ← Fusion & déduplication des signaux multi-sources
+│   │   ├── detector.js                 ← Détection produits au-dessus des seuils → insert DB
+│   │   └── market-analysis.service.js  ← Service principal exposé aux routes & scheduler
+│   │
+│   ├── seo/                           ── MODULE 2 : SEO Automatique
+│   │   ├── index.js                    ← Orchestrateur du module
+│   │   ├── generators/
+│   │   │   ├── product-sheet.generator.js ← Génère fiche produit complète via Mistral
+│   │   │   ├── meta.generator.js       ← Génère meta_title, meta_description, alt_text
+│   │   │   ├── slug.generator.js       ← Génère slug SEO-friendly depuis titre produit
+│   │   │   └── image.generator.js      ← Génère images via Pollinations.ai (gratuit)
+│   │   ├── sitemap/
+│   │   │   ├── sitemap.builder.js      ← Construit sitemap XML dynamique
+│   │   │   └── sitemap.pinger.js       ← Ping Google Search Console API
+│   │   ├── ranking/
+│   │   │   ├── keyword-tracker.js      ← Suivi positions mots-clés (DataForSEO / SerpAPI)
+│   │   │   └── ranking-reporter.js     ← Agrège résultats et insère dans seo_data
+│   │   ├── prompts/
+│   │   │   ├── product-description.prompt.js ← Template prompt FR/EN description
+│   │   │   └── meta-tags.prompt.js     ← Template prompt meta tags SEO
+│   │   └── seo.service.js              ← Service principal exposé aux routes & scheduler
+│   │
+│   ├── suppliers/                     ── MODULE 3 : Fournisseurs
+│   │   ├── index.js                    ← Orchestrateur du module
+│   │   ├── adapters/
+│   │   │   ├── cjdropshipping.adapter.js  ← Wrapper API CJDropshipping
+│   │   │   ├── aliexpress.adapter.js   ← Wrapper API AliExpress Dropshipping Center
+│   │   │   ├── autods.adapter.js       ← Wrapper API AutoDS (fallback #1)
+│   │   │   └── zendrop.adapter.js      ← Wrapper API Zendrop (fallback #2)
+│   │   ├── comparator/
+│   │   │   ├── price-comparator.js     ← Compare prix d'achat fournisseurs
+│   │   │   ├── reliability-scorer.js   ← Score fiabilité : note, délai, taux erreur
+│   │   │   └── supplier-selector.js    ← Sélection automatique meilleur fournisseur
+│   │   ├── sync/
+│   │   │   ├── stock-poller.js         ← Polling stock toutes les 2h
+│   │   │   ├── webhook-handler.js      ← Réception webhooks stock temps réel
+│   │   │   └── catalog-sync.js         ← Synchronisation catalogue fournisseurs → DB
+│   │   ├── order-router.js             ← Route commande client vers fournisseur sélectionné
+│   │   └── suppliers.service.js        ← Service principal exposé aux routes & scheduler
+│   │
+│   ├── pricing/                       ── MODULE 4 : Pricing Dynamique
+│   │   ├── index.js                    ← Orchestrateur du module
+│   │   ├── rules/
+│   │   │   ├── margin.rule.js          ← Calcul prix de vente (coefficient OU marge %)
+│   │   │   ├── trending.rule.js        ← Produit trending → marge +X% configurable
+│   │   │   ├── stagnant.rule.js        ← Produit stagnant → promo automatique
+│   │   │   └── floor.rule.js           ← Prix plancher (jamais sous seuil rentabilité)
+│   │   ├── competitors/
+│   │   │   ├── amazon.scraper.js       ← Scraping prix Amazon (Apify/ScraperAPI)
+│   │   │   ├── ebay.scraper.js         ← Scraping prix eBay
+│   │   │   ├── cdiscount.scraper.js    ← Scraping prix Cdiscount
+│   │   │   └── shopify-stores.scraper.js ← Scraping boutiques Shopify concurrentes
+│   │   ├── alerts/
+│   │   │   ├── below-threshold.alert.js   ← Alerte si concurrent sous seuil rentabilité
+│   │   │   └── price-war.detector.js   ← Détection guerre des prix & réponse auto
+│   │   ├── engine.js                   ← Moteur central : applique toutes les règles
+│   │   └── pricing.service.js          ← Service principal exposé aux routes & scheduler
+│   │
+│   ├── analytics/                     ── MODULE 5 : Analytique & Rentabilité
+│   │   ├── index.js                    ← Orchestrateur du module
+│   │   ├── calculators/
+│   │   │   ├── margin-calculator.js    ← Calcul marge nette par produit/commande
+│   │   │   ├── roi-calculator.js       ← ROI campagnes, sources trafic
+│   │   │   ├── ltv-calculator.js       ← LTV client (Lifetime Value)
+│   │   │   └── churn-calculator.js     ← Taux d'abandon & réactivation
+│   │   ├── reporters/
+│   │   │   ├── daily-report.js         ← Rapport rentabilité quotidien auto-généré
+│   │   │   ├── weekly-report.js        ← Rapport hebdomadaire consolidé
+│   │   │   └── strategy-adjuster.js    ← Ajustement autonome stratégie si KPIs hors seuils
+│   │   ├── dashboards/
+│   │   │   ├── kpi-aggregator.js       ← Agrège tous les KPIs pour le dashboard
+│   │   │   └── chart-data.builder.js   ← Prépare données JSON pour graphiques frontend
+│   │   └── analytics.service.js        ← Service principal exposé aux routes & scheduler
+│   │
+│   └── customer-service/             ── MODULE 6 : SAV & Clients via IA
+│       ├── index.js                    ← Orchestrateur du module
+│       ├── ai/
+│       │   ├── intent-classifier.js    ← Classification intention ticket via Mistral
+│       │   ├── response-generator.js   ← Génération réponse automatique Mistral
+│       │   └── escalation-detector.js  ← Détection tickets nécessitant escalade humaine
+│       ├── handlers/
+│       │   ├── refund.handler.js       ← Traitement automatique demandes remboursement
+│       │   ├── tracking.handler.js     ← Réponse suivi de commande automatique
+│       │   ├── complaint.handler.js    ← Gestion réclamations produits
+│       │   └── general.handler.js      ← Réponses FAQ générales
+│       ├── channels/
+│       │   ├── email.channel.js        ← Réception/envoi emails SAV (Nodemailer/SendGrid)
+│       │   └── webhook.channel.js      ← Réception tickets depuis formulaire frontend
+│       ├── memory/
+│       │   └── conversation.store.js   ← Historique conversations par client (SQLite)
+│       └── customer-service.service.js ← Service principal exposé aux routes & scheduler
+│
+├── routes/
+│   ├── index.js                        ← Routeur principal (monte tous les sous-routeurs)
+│   ├── products.routes.js              ← CRUD produits + déclenchement SEO
+│   ├── suppliers.routes.js             ← Gestion fournisseurs & sync manuelle
+│   ├── pricing.routes.js               ← Consultation/override règles pricing
+│   ├── analytics.routes.js             ← Endpoints dashboard & rapports
+│   ├── orders.routes.js                ← Suivi commandes & routage fournisseur
+│   ├── customers.routes.js             ← Gestion clients & historique
+│   ├── tickets.routes.js               ← API tickets SAV
+│   ├── seo.routes.js                   ← Génération/consultation données SEO
+│   ├── market.routes.js                ← Consultation trends & produits détectés
+│   └── scheduler.routes.js             ← Déclenchement manuel des cron jobs
+│
+├── middlewares/
+│   ├── auth.middleware.js              ← Authentification API Key / JWT admin
+│   ├── ratelimit.middleware.js          ← Rate limiting par IP (express-rate-limit)
+│   ├── logger.middleware.js            ← Log toutes les requêtes HTTP (Morgan + Winston)
+│   ├── error.middleware.js             ← Handler global d'erreurs (format JSON uniforme)
+│   ├── validator.middleware.js         ← Validation schémas requêtes (Zod)
+│   └── cache.middleware.js             ← Cache réponses GET non-critiques (node-cache)
+│
+├── scheduler/
+│   ├── index.js                        ← Démarre tous les cron jobs au boot
+│   ├── jobs/
+│   │   ├── market-analysis.job.js      ← Cron toutes les 6h → market-analysis.service
+│   │   ├── seo-update.job.js           ← Cron toutes les 24h → seo.service
+│   │   ├── supplier-sync.job.js        ← Cron toutes les 2h → suppliers.service
+│   │   ├── pricing-update.job.js       ← Cron toutes les 3h → pricing.service
+│   │   ├── analytics-report.job.js     ← Cron quotidien 03h00 → analytics.service
+│   │   └── customer-service.job.js     ← Cron toutes les 15min → tickets non traités
+│   └── cron-logger.js                  ← Écrit résultats jobs dans cron_logs (SQLite)
+│
+├── logs/
+│   ├── app.log                         ← Logs applicatifs généraux (Winston)
+│   ├── errors.log                      ← Logs erreurs uniquement
+│   ├── scheduler.log                   ← Logs exécutions cron jobs
+│   └── api-calls.log                   ← Logs appels APIs externes (quota tracking)
+│
+└── public/
+    ├── index.html                      ← Dashboard admin SPA (vanilla JS)
+    ├── css/
+    │   └── dashboard.css               ← Styles dashboard admin
+    ├── js/
+    │   ├── dashboard.js                ← JS dashboard : graphiques, KPIs temps réel
+    │   ├── products.js                 ← Gestion produits côté admin
+    │   └── api-client.js               ← Wrapper fetch vers API REST interne
+    ├── sitemap.xml                     ← Sitemap auto-généré (écrasé par le module SEO)
+    └── robots.txt                      ← Robots.txt statique
+```
+
+---
+
+## 2. RÔLE DE CHAQUE FICHIER
+
+### Racine & Config
+
+| Fichier | Rôle |
+|---|---|
+| `app.js` | Point d'entrée Express : monte middlewares, routes, démarre le serveur et le scheduler |
+| `package.json` | Métadonnées projet, scripts npm (start, dev, migrate, seed) |
+| `.env.example` | Template variables d'environnement (clés API, ports, secrets) — jamais commité |
+| `config/config.json` | Feature flags, timeouts, seuils globaux paramétrables sans redéploiement |
+| `config/scoring.json` | Seuils min/max score_viral, score_demand, score_competition pour détection produit gagnant |
+| `config/pricing.json` | Coefficient multiplicateur par défaut, marge minimale %, délai promo auto |
+| `config/suppliers.json` | Chaîne de priorité fournisseurs, seuils fiabilité, délai max acceptable |
+| `config/seo.json` | Paramètres Mistral (température, max_tokens), langues cibles, longueurs fiches |
+| `config/alerts.json` | Seuils déclenchement alertes pricing et rentabilité (email / log) |
+| `config/database.js` | Connexion SQLite, exécution migrations, seed données initiales |
+| `db/schema.sql` | DDL complet : toutes les CREATE TABLE, FOREIGN KEY et CREATE INDEX |
+| `db/migrations/001_init.sql` | Migration initiale : tables core (products, orders, customers, suppliers) |
+| `db/migrations/002_add_scoring.sql` | Ajout colonnes scoring et products_trends |
+| `db/migrations/003_add_analytics.sql` | Ajout tables analytics et cron_logs |
+
+### Module 1 — Analyse Marché
+
+| Fichier | Rôle |
+|---|---|
+| `modules/market-analysis/index.js` | Orchestre l'exécution séquentielle scrapers → aggregator → scorer → detector |
+| `modules/market-analysis/scrapers/tiktok.scraper.js` | Appelle Apify Actor TikTok Shop Scraper, retourne liste produits + métriques engagement |
+| `modules/market-analysis/scrapers/google-trends.scraper.js` | Récupère données tendances Google Trends (intérêt relatif, géo, période) |
+| `modules/market-analysis/scrapers/instagram.scraper.js` | Appelle Apify Actor Instagram Reels pour extraire hashtags/produits viraux |
+| `modules/market-analysis/scrapers/pinterest.scraper.js` | Appelle Apify Actor Pinterest Trends pour détecter produits en émergence |
+| `modules/market-analysis/scoring/scorer.js` | Calcule score_viral (engagement/views), score_demand (volume recherche), score_competition (densité offre) |
+| `modules/market-analysis/scoring/weights.js` | Définit pondérations par source (TikTok ×1.5, Google ×1.0, Instagram ×1.2...) |
+| `modules/market-analysis/scoring/threshold.js` | Lit scoring.json et expose les seuils de qualification produit gagnant |
+| `modules/market-analysis/aggregator.js` | Fusionne résultats multi-sources, déduplique par nom/ASIN/EAN |
+| `modules/market-analysis/detector.js` | Filtre produits dépassant les seuils et insère dans `products_trends` |
+| `modules/market-analysis/market-analysis.service.js` | Point d'entrée public du module, appelé par le scheduler et les routes |
+
+### Module 2 — SEO
+
+| Fichier | Rôle |
+|---|---|
+| `modules/seo/index.js` | Orchestre : sélectionne produits sans SEO → génère → sauvegarde → ping sitemap |
+| `modules/seo/generators/product-sheet.generator.js` | Appelle Mistral API (mistral-large-latest) pour générer description produit optimisée SEO |
+| `modules/seo/generators/meta.generator.js` | Génère meta_title (≤60 chars), meta_description (≤160 chars), alt_text images via Mistral |
+| `modules/seo/generators/slug.generator.js` | Crée slug URL SEO-friendly (lowercase, tirets, sans stopwords) depuis titre produit |
+| `modules/seo/generators/image.generator.js` | Génère images produit via Pollinations.ai REST API (gratuit, sans auth) |
+| `modules/seo/sitemap/sitemap.builder.js` | Construit sitemap XML complet depuis tous les produits publiés en DB |
+| `modules/seo/sitemap/sitemap.pinger.js` | Soumet le sitemap à Google Search Console via API indexing |
+| `modules/seo/ranking/keyword-tracker.js` | Interroge SerpAPI/DataForSEO pour suivre positions mots-clés cibles |
+| `modules/seo/ranking/ranking-reporter.js` | Agrège positions et historique, insère dans `seo_data` |
+| `modules/seo/prompts/product-description.prompt.js` | Template prompt structuré pour génération description (hook, features, CTA) |
+| `modules/seo/prompts/meta-tags.prompt.js` | Template prompt pour meta_title et meta_description avec contraintes longueur |
+| `modules/seo/seo.service.js` | Point d'entrée public du module |
+
+### Module 3 — Fournisseurs
+
+| Fichier | Rôle |
+|---|---|
+| `modules/suppliers/index.js` | Orchestre sync catalogue, comparaison, sélection fournisseur par produit |
+| `modules/suppliers/adapters/cjdropshipping.adapter.js` | Wrapper complet API CJDropshipping : auth, catalogue, stock, création commande |
+| `modules/suppliers/adapters/aliexpress.adapter.js` | Wrapper API AliExpress Dropshipping Center : recherche produits, import, commande |
+| `modules/suppliers/adapters/autods.adapter.js` | Wrapper API AutoDS : monitoring prix, import produits, fulfilment automatique |
+| `modules/suppliers/adapters/zendrop.adapter.js` | Wrapper API Zendrop : catalogue US/EU, commande, tracking |
+| `modules/suppliers/comparator/price-comparator.js` | Compare prix d'achat du même produit chez N fournisseurs simultanément |
+| `modules/suppliers/comparator/reliability-scorer.js` | Note chaque fournisseur (0-100) selon délai moyen, taux erreur, note clients |
+| `modules/suppliers/comparator/supplier-selector.js` | Sélectionne automatiquement le meilleur fournisseur selon prix × fiabilité × délai |
+| `modules/suppliers/sync/stock-poller.js` | Polling toutes les 2h de tous les fournisseurs actifs pour MAJ stock en DB |
+| `modules/suppliers/sync/webhook-handler.js` | Express handler recevant webhooks temps réel (OOS, price change) des fournisseurs |
+| `modules/suppliers/sync/catalog-sync.js` | Synchronise le catalogue fournisseur → table `supplier_products` |
+| `modules/suppliers/order-router.js` | À la réception d'une commande, route vers le fournisseur sélectionné et crée l'ordre |
+| `modules/suppliers/suppliers.service.js` | Point d'entrée public du module |
+
+### Module 4 — Pricing
+
+| Fichier | Rôle |
+|---|---|
+| `modules/pricing/index.js` | Orchestre : scraping concurrents → application règles → MAJ prix produits |
+| `modules/pricing/rules/margin.rule.js` | Calcule prix de vente = prix_achat × coefficient OU prix_achat + marge_fixe_% |
+| `modules/pricing/rules/trending.rule.js` | Si score_viral > seuil : augmente la marge de +X% configurable |
+| `modules/pricing/rules/stagnant.rule.js` | Si pas de vente depuis N jours : déclenche promo automatique (- Y%) |
+| `modules/pricing/rules/floor.rule.js` | Garantit que le prix de vente ne descend jamais sous le seuil de rentabilité minimal |
+| `modules/pricing/competitors/amazon.scraper.js` | Scrape prix Amazon via ScraperAPI/Apify pour les produits du catalogue |
+| `modules/pricing/competitors/ebay.scraper.js` | Scrape prix eBay pour veille concurrentielle |
+| `modules/pricing/competitors/cdiscount.scraper.js` | Scrape prix Cdiscount (marché FR) |
+| `modules/pricing/competitors/shopify-stores.scraper.js` | Scrape boutiques Shopify concurrentes identifiées via Google |
+| `modules/pricing/alerts/below-threshold.alert.js` | Log/email si un concurrent vend sous le prix plancher de rentabilité |
+| `modules/pricing/alerts/price-war.detector.js` | Détecte baisse coordonnée de plusieurs concurrents et déclenche stratégie défensive |
+| `modules/pricing/engine.js` | Applique toutes les règles dans l'ordre sur l'ensemble du catalogue |
+| `modules/pricing/pricing.service.js` | Point d'entrée public du module |
+
+### Module 5 — Analytics
+
+| Fichier | Rôle |
+|---|---|
+| `modules/analytics/index.js` | Orchestre calculs KPIs, génération rapports, ajustements stratégiques |
+| `modules/analytics/calculators/margin-calculator.js` | Calcule marge nette = (prix_vente - prix_achat - frais_ship - frais_plateforme) par commande |
+| `modules/analytics/calculators/roi-calculator.js` | ROI = (revenus - coûts_totaux) / coûts_totaux × 100 par source de trafic / campagne |
+| `modules/analytics/calculators/ltv-calculator.js` | LTV client sur N mois glissants (commandes moyennes × panier moyen × rétention) |
+| `modules/analytics/calculators/churn-calculator.js` | Taux d'abandon panier et taux de réachat, détecte clients inactifs depuis X jours |
+| `modules/analytics/reporters/daily-report.js` | Génère rapport JSON quotidien : CA, marge, commandes, top produits |
+| `modules/analytics/reporters/weekly-report.js` | Consolide 7 rapports quotidiens en rapport hebdomadaire avec évolutions % |
+| `modules/analytics/reporters/strategy-adjuster.js` | Si KPIs hors seuils (marge < X%, CA - Y%) : ajuste automatiquement pricing et catalogue |
+| `modules/analytics/dashboards/kpi-aggregator.js` | Agrège tous les KPIs temps réel pour l'endpoint dashboard |
+| `modules/analytics/dashboards/chart-data.builder.js` | Formate données en séries temporelles JSON prêtes pour Chart.js |
+| `modules/analytics/analytics.service.js` | Point d'entrée public du module |
+
+### Module 6 — Customer Service
+
+| Fichier | Rôle |
+|---|---|
+| `modules/customer-service/index.js` | Orchestre traitement tickets : classification → handler → réponse → log |
+| `modules/customer-service/ai/intent-classifier.js` | Envoie ticket à Mistral pour classifier l'intention (remboursement, tracking, plainte...) |
+| `modules/customer-service/ai/response-generator.js` | Génère réponse client personnalisée et contextuelle via Mistral |
+| `modules/customer-service/ai/escalation-detector.js` | Détecte tickets complexes/sensibles nécessitant revue humaine (flag escalation) |
+| `modules/customer-service/handlers/refund.handler.js` | Traite automatiquement les demandes de remboursement éligibles selon politique |
+| `modules/customer-service/handlers/tracking.handler.js` | Récupère numéro de suivi fournisseur et formule réponse tracking au client |
+| `modules/customer-service/handlers/complaint.handler.js` | Gère réclamations produits (défectueux, non-conforme) : propose solution auto |
+| `modules/customer-service/handlers/general.handler.js` | Répond aux questions générales (délais, retours, paiements) via base de connaissance |
+| `modules/customer-service/channels/email.channel.js` | Polling IMAP entrant + envoi SMTP réponses (Nodemailer + SendGrid) |
+| `modules/customer-service/channels/webhook.channel.js` | Reçoit nouveaux tickets depuis formulaire contact frontend via POST webhook |
+| `modules/customer-service/memory/conversation.store.js` | Stocke et récupère l'historique de conversation par client pour contexte IA |
+| `modules/customer-service/customer-service.service.js` | Point d'entrée public du module |
+
+### Routes
+
+| Fichier | Rôle |
+|---|---|
+| `routes/index.js` | Monte tous les sous-routeurs sous leurs préfixes `/api/v1/...` |
+| `routes/products.routes.js` | GET/POST/PUT/DELETE produits, déclenche génération SEO à la création |
+| `routes/suppliers.routes.js` | CRUD fournisseurs, déclenchement sync manuelle, consultation comparateur |
+| `routes/pricing.routes.js` | Consultation règles actives, override manuel prix, historique concurrent |
+| `routes/analytics.routes.js` | Endpoints KPIs dashboard, exports CSV, rapports périodiques |
+| `routes/orders.routes.js` | Création commande, statut, historique, déclenchement routage fournisseur |
+| `routes/customers.routes.js` | CRUD clients, historique commandes, LTV calculée |
+| `routes/tickets.routes.js` | Création ticket, consultation, résolution, escalade |
+| `routes/seo.routes.js` | Consultation seo_data par produit, regénération manuelle, suivi rankings |
+| `routes/market.routes.js` | Consultation trends détectées, top produits scorés, historique analyses |
+| `routes/scheduler.routes.js` | Déclenchement manuel de n'importe quel job cron pour debug/tests |
+
+### Middlewares
+
+| Fichier | Rôle |
+|---|---|
+| `middlewares/auth.middleware.js` | Vérifie API Key en header `X-Admin-Key` pour protéger toutes les routes admin |
+| `middlewares/ratelimit.middleware.js` | Limite 100 req/15min par IP (express-rate-limit) contre abus |
+| `middlewares/logger.middleware.js` | Log HTTP (méthode, route, status, durée) via Morgan vers Winston |
+| `middlewares/error.middleware.js` | Intercepte toutes les erreurs non gérées, retourne JSON structuré uniforme |
+| `middlewares/validator.middleware.js` | Valide body/params/query avec schémas Zod avant transmission aux controllers |
+| `middlewares/cache.middleware.js` | Cache en mémoire (node-cache, TTL 5min) des réponses GET non-critiques |
+
+### Scheduler
+
+| Fichier | Rôle |
+|---|---|
+| `scheduler/index.js` | Initialise et démarre tous les cron jobs au démarrage de l'application |
+| `scheduler/jobs/market-analysis.job.js` | Cron `0 */6 * * *` : déclenche analyse marché complète |
+| `scheduler/jobs/seo-update.job.js` | Cron `0 2 * * *` : génère/MAJ SEO pour produits sans fiche ou modifiés |
+| `scheduler/jobs/supplier-sync.job.js` | Cron `0 */2 * * *` : synchronise stocks et prix tous les fournisseurs actifs |
+| `scheduler/jobs/pricing-update.job.js` | Cron `0 */3 * * *` : scraping concurrents + recalcul prix catalogue complet |
+| `scheduler/jobs/analytics-report.job.js` | Cron `0 3 * * *` : génère rapport quotidien, ajuste stratégie si KPIs dégradés |
+| `scheduler/jobs/customer-service.job.js` | Cron `*/15 * * * *` : traite tickets en attente (email + webhook) |
+| `scheduler/cron-logger.js` | Insère dans `cron_logs` : job_name, statut, durée, items_processed, error_message |
+
+---
+
+## 3. SCHÉMA SQLITE COMPLET
+
+```sql
+-- ============================================================
+-- TABLE : products
+-- ============================================================
+CREATE TABLE IF NOT EXISTS products (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  external_id       TEXT UNIQUE,                        -- ID chez le fournisseur
+  name              TEXT NOT NULL,
+  slug              TEXT UNIQUE NOT NULL,
+  description       TEXT,
+  short_description TEXT,
+  category          TEXT,
+  brand             TEXT,
+  sku               TEXT UNIQUE,
+  status            TEXT NOT NULL DEFAULT 'draft'       -- draft | published | archived
+                      CHECK (status IN ('draft','published','archived')),
+  supplier_id       INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
+  cost_price        REAL NOT NULL DEFAULT 0,            -- Prix d'achat fournisseur
+  sale_price        REAL NOT NULL DEFAULT 0,            -- Prix de vente calculé
+  stock_qty         INTEGER NOT NULL DEFAULT 0,
+  weight_g          REAL,
+  images_json       TEXT,                               -- JSON array d'URLs images
+  tags_json         TEXT,                               -- JSON array de tags
+  is_trending       INTEGER NOT NULL DEFAULT 0,
+  score_global      REAL DEFAULT 0,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_products_status ON products(status);
+CREATE INDEX IF NOT EXISTS idx_products_supplier ON products(supplier_id);
+CREATE INDEX IF NOT EXISTS idx_products_trending ON products(is_trending, score_global DESC);
+CREATE INDEX IF NOT EXISTS idx_products_slug ON products(slug);
+
+-- ============================================================
+-- TABLE : products_trends
+-- ============================================================
+CREATE TABLE IF NOT EXISTS products_trends (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id       INTEGER REFERENCES products(id) ON DELETE CASCADE,
+  source           TEXT NOT NULL                        -- tiktok | google_trends | instagram | pinterest
+                     CHECK (source IN ('tiktok','google_trends','instagram','pinterest')),
+  keyword          TEXT NOT NULL,
+  score_viral      REAL NOT NULL DEFAULT 0 CHECK (score_viral BETWEEN 0 AND 100),
+  score_demand     REAL NOT NULL DEFAULT 0 CHECK (score_demand BETWEEN 0 AND 100),
+  score_competition REAL NOT NULL DEFAULT 0 CHECK (score_competition BETWEEN 0 AND 100),
+  score_global     REAL NOT NULL DEFAULT 0 CHECK (score_global BETWEEN 0 AND 100),
+  raw_data_json    TEXT,                                -- Payload brut de la source
+  detected_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at       TEXT                                 -- Date d'expiration du signal
+);
+
+CREATE INDEX IF NOT EXISTS idx_trends_score ON products_trends(score_global DESC);
+CREATE INDEX IF NOT EXISTS idx_trends_source ON products_trends(source, detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trends_product ON products_trends(product_id);
+
+-- ============================================================
+-- TABLE : seo_data
+-- ============================================================
+CREATE TABLE IF NOT EXISTS seo_data (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id       INTEGER NOT NULL UNIQUE REFERENCES products(id) ON DELETE CASCADE,
+  meta_title       TEXT,
+  meta_description TEXT,
+  alt_text         TEXT,
+  slug             TEXT,
+  h1               TEXT,
+  full_description TEXT,                                -- Description longue générée par Mistral
+  short_description TEXT,                               -- Accroche courte générée
+  keywords_json    TEXT,                                -- JSON array mots-clés cibles
+  image_url        TEXT,                                -- URL image générée Pollinations.ai
+  sitemap_priority REAL DEFAULT 0.8,
+  sitemap_changefreq TEXT DEFAULT 'weekly',
+  ranking_data_json TEXT,                               -- JSON {keyword: position} dernier tracking
+  generated_by     TEXT DEFAULT 'mistral-large-latest',
+  generated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_seo_product ON seo_data(product_id);
+CREATE INDEX IF NOT EXISTS idx_seo_updated ON seo_data(updated_at DESC);
+
+-- ============================================================
+-- TABLE : suppliers
+-- ============================================================
+CREATE TABLE IF NOT EXISTS suppliers (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  name             TEXT NOT NULL UNIQUE,                -- cjdropshipping | aliexpress | autods | zendrop
+  platform         TEXT NOT NULL
+                     CHECK (platform IN ('cjdropshipping','aliexpress','autods','zendrop','other')),
+  api_base_url     TEXT,
+  is_active        INTEGER NOT NULL DEFAULT 1,
+  is_fallback      INTEGER NOT NULL DEFAULT 0,
+  priority         INTEGER NOT NULL DEFAULT 1,          -- 1 = highest priority
+  reliability_score REAL DEFAULT 100,                   -- Score auto-calculé 0-100
+  avg_delivery_days REAL DEFAULT 15,
+  error_rate       REAL DEFAULT 0,                      -- % commandes en erreur
+  total_orders     INTEGER DEFAULT 0,
+  total_errors     INTEGER DEFAULT 0,
+  credentials_json TEXT,                                -- Encrypted: {api_key, secret, token}
+  webhook_url      TEXT,
+  notes            TEXT,
+  created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_suppliers_active ON suppliers(is_active, priority);
+CREATE INDEX IF NOT EXISTS idx_suppliers_reliability ON suppliers(reliability_score DESC);
+
+-- ============================================================
+-- TABLE : supplier_products
+-- ============================================================
+CREATE TABLE IF NOT EXISTS supplier_products (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  supplier_id         INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+  product_id          INTEGER REFERENCES products(id) ON DELETE SET NULL,
+  supplier_product_id TEXT NOT NULL,                    -- ID produit chez le fournisseur
+  supplier_sku        TEXT,
+  title               TEXT,
+  cost_price          REAL NOT NULL DEFAULT 0,
+  shipping_cost       REAL DEFAULT 0,
+  stock_qty           INTEGER DEFAULT 0,
+  stock_status        TEXT DEFAULT 'unknown'
+                        CHECK (stock_status IN ('in_stock','low_stock','out_of_stock','unknown')),
+  avg_delivery_days   REAL DEFAULT 15,
+  supplier_rating     REAL DEFAULT 0,
+  variants_json       TEXT,                             -- JSON variantes (tailles, couleurs)
+  last_synced_at      TEXT,
+  created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(supplier_id, supplier_product_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sp_supplier ON supplier_products(supplier_id);
+CREATE INDEX IF NOT EXISTS idx_sp_product ON supplier_products(product_id);
+CREATE INDEX IF NOT EXISTS idx_sp_stock ON supplier_products(stock_status);
+
+-- ============================================================
+-- TABLE : pricing_rules
+-- ============================================================
+CREATE TABLE IF NOT EXISTS pricing_rules (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  name              TEXT NOT NULL,
+  rule_type         TEXT NOT NULL
+                      CHECK (rule_type IN ('coefficient','fixed_margin','trending_boost','stagnant_promo','floor')),
+  applies_to        TEXT NOT NULL DEFAULT 'all'         -- all | category:X | product_id:Y
+                      CHECK (applies_to LIKE 'all' OR applies_to LIKE 'category:%' OR applies_to LIKE 'product_id:%'),
+  coefficient       REAL,                               -- Multiplicateur (ex: 2.5 = 150% marge)
+  fixed_margin_pct  REAL,                               -- Marge fixe en % (ex: 40)
+  boost_pct         REAL,                               -- % augmentation si trending
+  promo_pct         REAL,                               -- % réduction si stagnant
+  floor_price       REAL,                               -- Prix plancher absolu
+  stagnant_days     INTEGER DEFAULT 30,                 -- Nb jours sans vente = stagnant
+  is_active         INTEGER NOT NULL DEFAULT 1,
+  priority          INTEGER NOT NULL DEFAULT 1,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_pricing_active ON pricing_rules(is_active, priority);
+
+-- ============================================================
+-- TABLE : competitors_prices
+-- ============================================================
+CREATE TABLE IF NOT EXISTS competitors_prices (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id       INTEGER REFERENCES products(id) ON DELETE CASCADE,
+  platform         TEXT NOT NULL
+                     CHECK (platform IN ('amazon','ebay','cdiscount','shopify','other')),
+  competitor_url   TEXT,
+  competitor_name  TEXT,
+  price            REAL NOT NULL,
+  shipping_cost    REAL DEFAULT 0,
+  total_price      REAL GENERATED ALWAYS AS (price + shipping_cost) STORED,
+  currency         TEXT DEFAULT 'EUR',
+  in_stock         INTEGER DEFAULT 1,
+  scraped_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_competitors_product ON competitors_prices(product_id, scraped_at DESC);
+CREATE INDEX IF NOT EXISTS idx_competitors_platform ON competitors_prices(platform, scraped_at DESC);
+
+-- ============================================================
+-- TABLE : customers
+-- ============================================================
+CREATE TABLE IF NOT EXISTS customers (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  email            TEXT NOT NULL UNIQUE,
+  first_name       TEXT,
+  last_name        TEXT,
+  phone            TEXT,
+  address_json     TEXT,                                -- JSON {street, city, zip, country}
+  total_orders     INTEGER DEFAULT 0,
+  total_spent      REAL DEFAULT 0,
+  ltv              REAL DEFAULT 0,                      -- Lifetime Value calculée
+  acquisition_source TEXT,                              -- organic | paid | social | referral
+  is_vip           INTEGER DEFAULT 0,
+  last_order_at    TEXT,
+  created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_customers_email ON customers(email);
+CREATE INDEX IF NOT EXISTS idx_customers_ltv ON customers(ltv DESC);
+CREATE INDEX IF NOT EXISTS idx_customers_vip ON customers(is_vip);
+
+-- ============================================================
+-- TABLE : orders
+-- ============================================================
+CREATE TABLE IF NOT EXISTS orders (
+  id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_ref             TEXT NOT NULL UNIQUE,           -- Référence commande public (ex: ORD-20260101-001)
+  customer_id           INTEGER NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
+  supplier_id           INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
+  supplier_order_id     TEXT,                           -- ID commande chez le fournisseur
+  status                TEXT NOT NULL DEFAULT 'pending'
+                          CHECK (status IN ('pending','confirmed','shipped','delivered','cancelled','refunded')),
+  items_json            TEXT NOT NULL,                  -- JSON [{product_id, qty, unit_price, cost_price}]
+  subtotal              REAL NOT NULL DEFAULT 0,
+  shipping_cost         REAL DEFAULT 0,
+  tax                   REAL DEFAULT 0,
+  total                 REAL NOT NULL DEFAULT 0,
+  cost_total            REAL DEFAULT 0,                 -- Coût total (achat + ship fournisseur)
+  margin                REAL DEFAULT 0,                 -- Marge nette = total - cost_total
+  margin_pct            REAL DEFAULT 0,
+  payment_method        TEXT,
+  payment_status        TEXT DEFAULT 'pending'
+                          CHECK (payment_status IN ('pending','paid','failed','refunded')),
+  tracking_number       TEXT,
+  tracking_url          TEXT,
+  shipped_at            TEXT,
+  delivered_at          TEXT,
+  notes                 TEXT,
+  created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at            TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_orders_supplier ON orders(supplier_id);
+CREATE INDEX IF NOT EXISTS idx_orders_date ON orders(created_at DESC);
+
+-- ============================================================
+-- TABLE : tickets
+-- ============================================================
+CREATE TABLE IF NOT EXISTS tickets (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket_ref       TEXT NOT NULL UNIQUE,                -- REF-XXXXXX
+  customer_id      INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+  order_id         INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+  channel          TEXT DEFAULT 'email'
+                     CHECK (channel IN ('email','webhook','phone','chat')),
+  subject          TEXT,
+  body             TEXT NOT NULL,
+  intent           TEXT,                                -- Classification IA : refund|tracking|complaint|general
+  status           TEXT NOT NULL DEFAULT 'open'
+                     CHECK (status IN ('open','in_progress','resolved','escalated','closed')),
+  priority         TEXT DEFAULT 'normal'
+                     CHECK (priority IN ('low','normal','high','urgent')),
+  requires_human   INTEGER DEFAULT 0,
+  ai_response      TEXT,                                -- Réponse générée par Mistral
+  ai_confidence    REAL,                                -- Score de confiance (0-1)
+  resolution_notes TEXT,
+  opened_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  resolved_at      TEXT,
+  updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status, opened_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tickets_customer ON tickets(customer_id);
+CREATE INDEX IF NOT EXISTS idx_tickets_intent ON tickets(intent);
+CREATE INDEX IF NOT EXISTS idx_tickets_human ON tickets(requires_human, status);
+
+-- ============================================================
+-- TABLE : sales_analytics
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sales_analytics (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  period_type      TEXT NOT NULL
+                     CHECK (period_type IN ('daily','weekly','monthly')),
+  period_date      TEXT NOT NULL,                       -- YYYY-MM-DD (début de période)
+  revenue          REAL DEFAULT 0,
+  cost_total       REAL DEFAULT 0,
+  gross_margin     REAL DEFAULT 0,
+  gross_margin_pct REAL DEFAULT 0,
+  orders_count     INTEGER DEFAULT 0,
+  avg_order_value  REAL DEFAULT 0,
+  new_customers    INTEGER DEFAULT 0,
+  returning_customers INTEGER DEFAULT 0,
+  top_products_json TEXT,                               -- JSON [{product_id, revenue, qty}]
+  top_categories_json TEXT,
+  traffic_sources_json TEXT,                            -- JSON {organic: N, paid: N, ...}
+  refunds_count    INTEGER DEFAULT 0,
+  refunds_amount   REAL DEFAULT 0,
+  tickets_opened   INTEGER DEFAULT 0,
+  tickets_resolved INTEGER DEFAULT 0,
+  computed_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(period_type, period_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_analytics_period ON sales_analytics(period_type, period_date DESC);
+
+-- ============================================================
+-- TABLE : cron_logs
+-- ============================================================
+CREATE TABLE IF NOT EXISTS cron_logs (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_name         TEXT NOT NULL,
+  status           TEXT NOT NULL
+                     CHECK (status IN ('started','success','failed','partial')),
+  items_processed  INTEGER DEFAULT 0,
+  items_failed     INTEGER DEFAULT 0,
+  duration_ms      INTEGER,
+  error_message    TEXT,
+  payload_json     TEXT,                                -- Données supplémentaires contexte
+  started_at       TEXT NOT NULL DEFAULT (datetime('now')),
+  finished_at      TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_cron_job ON cron_logs(job_name, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_cron_status ON cron_logs(status, started_at DESC);
+```
+
+---
+
+## 4. PACKAGES NPM PAR MODULE
+
+### 🌐 Core & Serveur
+
+| Package | Utilité |
+|---|---|
+| `express@5.1.0` | Framework HTTP principal, routing, middlewares |
+| `better-sqlite3@11.9.1` | Accès SQLite synchrone ultra-rapide (pas d'async hell) |
+| `dotenv@16.5.0` | Chargement variables d'environnement depuis `.env` |
+| `winston@3.17.0` | Logger structuré multi-transports (file, console, JSON) |
+| `morgan@1.10.0` | Middleware log requêtes HTTP (intégré avec Winston) |
+| `zod@3.24.2` | Validation schémas TypeScript-like pour body/params/query |
+| `express-rate-limit@7.5.0` | Rate limiting par IP anti-abus |
+| `node-cache@5.1.2` | Cache in-memory TTL pour réponses GET non-critiques |
+| `uuid@11.1.0` | Génération identifiants uniques (refs commandes, tickets) |
+| `node-cron@3.0.3` | Planificateur cron jobs (syntaxe cron standard) |
+| `axios@1.8.4` | Client HTTP pour appels APIs externes avec intercepteurs |
+| `dayjs@1.11.13` | Manipulation dates légère (alternative Moment.js) |
+
+### 📊 Module 1 — Analyse Marché
+
+| Package | Utilité |
+|---|---|
+| `apify-client@2.11.1` | Client officiel Apify pour appel Actors (TikTok, Instagram, Pinterest) |
+| `google-trends-api@4.9.2` | Requêtes Google Trends (intérêt dans le temps, régional, related) |
+| `puppeteer@22.15.0` | Browser headless Chromium pour scraping JS-heavy en fallback |
+| `cheerio@1.0.0` | Parser HTML façon jQuery pour scraping HTML statique |
+| `natural@8.0.1` | NLP : tokenisation, stemming pour analyse mots-clés tendance |
+| `compromise@14.14.3` | NLP léger EN/FR pour extraction entités nommées (marques, produits) |
+
+### ✍️ Module 2 — SEO Automatique
+
+| Package | Utilité |
+|---|---|
+| `@mistralai/mistralai@1.8.2` | SDK officiel Mistral AI pour génération texte (fiches, meta, descriptions) |
+| `node-fetch@3.3.2` | Fetch HTTP pour appels Pollinations.ai (image generation REST) |
+| `xmlbuilder2@3.1.1` | Génération sitemap XML valide depuis données produits |
+| `slugify@1.6.6` | Génération slugs SEO-friendly (accents, espaces, caractères spéciaux) |
+| `html-entities@2.5.2` | Encoding/decoding entités HTML dans les descriptions générées |
+| `sharp@0.33.5` | Redimensionnement et optimisation images générées (WebP, compression) |
+
+### 🏭 Module 3 — Fournisseurs
+
+| Package | Utilité |
+|---|---|
+| `axios@1.8.4` | Appels APIs CJDropshipping, AliExpress, AutoDS, Zendrop |
+| `axios-retry@4.5.0` | Retry automatique des requêtes API fournisseurs (backoff exponentiel) |
+| `p-limit@6.2.0` | Contrôle concurrence des appels API simultanés (rate limit fournisseur) |
+| `p-queue@8.1.0` | File d'attente de promesses pour sync catalogue massive |
+| `node-cron@3.0.3` | Cron polling stock toutes les 2h |
+| `crypto@built-in` | Chiffrement credentials fournisseurs stockés en DB |
+
+### 💰 Module 4 — Pricing Dynamique
+
+| Package | Utilité |
+|---|---|
+| `apify-client@2.11.1` | Scraping Amazon, eBay via Actors Apify dédiés |
+| `puppeteer@22.15.0` | Scraping Cdiscount et boutiques Shopify (pages JS-rendered) |
+| `puppeteer-extra@3.3.6` | Plugins puppeteer (stealth mode anti-détection) |
+| `puppeteer-extra-plugin-stealth@2.11.2` | Contourne détection bot pour scraping concurrentiel |
+| `cheerio@1.0.0` | Parsing HTML réponses scraping (pages statiques) |
+| `decimal.js@10.5.0` | Calculs prix sans erreurs floating-point (finance-grade precision) |
+| `nodemailer@6.10.1` | Envoi alertes email si concurrent sous seuil rentabilité |
+
+### 📈 Module 5 — Analytics & Rentabilité
+
+| Package | Utilité |
+|---|---|
+| `better-sqlite3@11.9.1` | Requêtes analytiques agrégées directement en SQLite (GROUP BY, SUM) |
+| `dayjs@1.11.13` | Calcul périodes (daily, weekly, monthly), comparaisons temporelles |
+| `json2csv@6.1.3` | Export rapports analytiques en format CSV téléchargeable |
+| `decimal.js@10.5.0` | Calculs marges et ROI sans erreurs d'arrondi |
+| `@mistralai/mistralai@1.8.2` | Génération résumé stratégique hebdomadaire en langage naturel |
+| `simple-statistics@7.8.8` | Statistiques descriptives : médiane, écart-type, régression linéaire tendances |
+
+### 🎧 Module 6 — Customer Service
+
+| Package | Utilité |
+|---|---|
+| `@mistralai/mistralai@1.8.2` | Classification intents tickets + génération réponses client contextuelles |
+| `nodemailer@6.10.1` | Envoi réponses email clients (SMTP/SendGrid transport) |
+| `imap-simple@5.1.0` | Lecture boîte email entrante IMAP pour réception tickets email |
+| `mailparser@3.7.4` | Parsing emails entrants (headers, body, pièces jointes) |
+| `@sendgrid/mail@8.1.4` | Envoi emails transactionnels via SendGrid API (fiabilité prod) |
+| `express-async-errors@3.1.1` | Gestion async/await errors dans Express sans try/catch répétitifs |
+| `sanitize-html@2.15.0` | Nettoyage HTML contenu emails entrants (sécurité XSS) |
+
+---
+
+## 5. APIs EXTERNES PAR MODULE
+
+### 📊 Module 1 — Analyse Marché
+
+| API | Documentation | Utilité | Auth | Tarif |
+|---|---|---|---|---|
+| **Apify — TikTok Shop Scraper** | https://apify.com/actors/tiktok-shop-scraper | Scraping produits viraux TikTok Shop, vues, engagement, hashtags | API Key (Bearer) | Payant ($49/mo+) |
+| **Apify — Instagram Reels Scraper** | https://apify.com/apify/instagram-scraper | Extraction Reels tendances, hashtags produits, metrics engagement | API Key (Bearer) | Payant (pay-per-use) |
+| **Apify — Pinterest Scraper** | https://apify.com/zuzka/pinterest-scraper | Scraping pins trending, boards populaires, produits émergents | API Key (Bearer) | Payant (pay-per-use) |
+| **Google Trends (npm unofficial)** | https://github.com/pat310/google-trends-api | Données intérêt relatif mots-clés, tendances géolocalisées | Aucune (scraping) | Gratuit (limité) |
+| **SerpAPI** | https://serpapi.com/docs | Résultats Google Search pour valider volume de recherche réel | API Key | Freemium ($50/mo) |
+
+### ✍️ Module 2 — SEO Automatique
+
+| API | Documentation | Utilité | Auth | Tarif |
+|---|---|---|---|---|
+| **Mistral AI API** | https://docs.mistral.ai/api | Génération descriptions produits, meta_title, meta_description, alt_text | API Key (Bearer) | Payant (usage $0.002/1K tokens) |
+| **Pollinations.ai** | https://pollinations.ai/docs | Génération images produit par prompt texte, sans clé API | Aucune | **Gratuit** |
+| **Google Search Console API** | https://developers.google.com/webmaster-tools | Ping sitemap, suivi indexation, alertes couverture | OAuth 2.0 (service account) | **Gratuit** |
+| **DataForSEO API** | https://docs.dataforseo.com | Suivi positions mots-clés, SERP data, volume de recherche | API Key (Basic Auth) | Payant ($50/mo+) |
+
+### 🏭 Module 3 — Fournisseurs
+
+| API | Documentation | Utilité | Auth | Tarif |
+|---|---|---|---|---|
+| **CJDropshipping API** | https://cjdropshipping.com/API_doc.html | Catalogue produits, stock temps réel, création commandes automatiques, tracking | API Key | **Gratuit** (commission sur ventes) |
+| **AliExpress Dropshipping Center API** | https://developers.aliexpress.com/dropshipping | Import produits, prix fournisseur, fiabilité vendeur, commandes AliExpress | API Key + OAuth 2.0 | **Gratuit** (compte vendeur requis) |
+| **AutoDS API** | https://www.autods.com/api | Import produits multi-sources, surveillance prix automatique, fulfillment | API Key (Bearer) | Payant ($26/mo+) |
+| **Zendrop API** | https://app.zendrop.com/developers | Catalogue US/EU, commandes 1-click, branded shipping, tracking | API Key | Freemium ($49/mo pour API) |
+| **17Track API** | https://www.17track.net/en/api | Tracking unifié tous transporteurs (DHL, FedEx, China Post, ePacket...) | API Key | Freemium (500 tracks/mo gratuit) |
+
+### 💰 Module 4 — Pricing Dynamique
+
+| API | Documentation | Utilité | Auth | Tarif |
+|---|---|---|---|---|
+| **Apify — Amazon Product Scraper** | https://apify.com/actors/amazon-product-scraper | Scraping prix, stock, ratings Amazon (toutes marketplaces EU) | API Key | Payant (pay-per-use) |
+| **Apify — eBay Scraper** | https://apify.com/drobnikj/ebay-items-scraper | Scraping prix eBay achetés/vendus pour veille tarifaire | API Key | Payant (pay-per-use) |
+| **ScraperAPI** | https://docs.scraperapi.com | Proxy rotatif anti-détection pour scraping Cdiscount, boutiques Shopify | API Key | Freemium (1000 req/mo gratuit, $49/mo) |
+| **SendGrid API** | https://docs.sendgrid.com/api-reference | Envoi emails alertes pricing, rapports automatiques | API Key (Bearer) | Freemium (100 emails/jour gratuit) |
+
+### 📈 Module 5 — Analytics
+
+| API | Documentation | Utilité | Auth | Tarif |
+|---|---|---|---|---|
+| **Mistral AI API** | https://docs.mistral.ai/api | Génération résumé hebdomadaire stratégique en langage naturel | API Key (Bearer) | Payant (usage) |
+| **Google Analytics 4 API** | https://developers.google.com/analytics/devguides/reporting | Sources de trafic, comportement utilisateurs, conversions | OAuth 2.0 (service account) | **Gratuit** |
+
+### 🎧 Module 6 — Customer Service
+
+| API | Documentation | Utilité | Auth | Tarif |
+|---|---|---|---|---|
+| **Mistral AI API** | https://docs.mistral.ai/api | Classification intent tickets + génération réponses clients contextuelles | API Key (Bearer) | Payant (usage $0.002/1K tokens) |
+| **SendGrid API** | https://docs.sendgrid.com/api-reference | Envoi réponses email clients, confirmation commandes, notifications | API Key (Bearer) | Freemium (100/jour gratuit, $20/mo+) |
+| **Twilio API** *(optionnel)* | https://www.twilio.com/docs | Envoi SMS notifications livraison et alertes clients | API Key + Auth Token | Payant (pay-per-use, ~$0.05/SMS) |
+
+---
+
+## 📋 Récapitulatif Coûts APIs Mensuels (estimation)
+
+| Service | Coût estimé/mois |
+|---|---|
+| Apify (scraping market + pricing) | $49 – $150 |
+| Mistral AI (SEO + SAV + analytics) | $20 – $80 |
+| AutoDS OU Zendrop (fallback fournisseur) | $26 – $49 |
+| DataForSEO (tracking keywords) | $50 |
+| SendGrid (emails) | $0 – $20 |
+| ScraperAPI (pricing scraping) | $0 – $49 |
+| 17Track (tracking colis) | $0 – $15 |
+| **TOTAL ESTIMÉ** | **$145 – $413/mois** |
+
+> 🆓 Gratuits : Pollinations.ai (images), Google Search Console, Google Analytics 4, CJDropshipping, AliExpress, Google Trends
+
+---
+
+*Architecture générée pour `autonomous-drop` v1.0 — Node.js 22 LTS · Express 5 · SQLite · Mistral AI · 2026*
