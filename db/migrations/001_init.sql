@@ -1,0 +1,87 @@
+-- Migration 001 : Tables core
+CREATE TABLE IF NOT EXISTS suppliers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  platform TEXT NOT NULL CHECK (platform IN ('cjdropshipping','aliexpress','autods','zendrop','other')),
+  api_base_url TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  is_fallback INTEGER NOT NULL DEFAULT 0,
+  priority INTEGER NOT NULL DEFAULT 1,
+  reliability_score REAL DEFAULT 100,
+  avg_delivery_days REAL DEFAULT 15,
+  error_rate REAL DEFAULT 0,
+  total_orders INTEGER DEFAULT 0,
+  total_errors INTEGER DEFAULT 0,
+  credentials_json TEXT,
+  webhook_url TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS customers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT NOT NULL UNIQUE,
+  first_name TEXT,
+  last_name TEXT,
+  phone TEXT,
+  address_json TEXT,
+  total_orders INTEGER DEFAULT 0,
+  total_spent REAL DEFAULT 0,
+  ltv REAL DEFAULT 0,
+  acquisition_source TEXT,
+  is_vip INTEGER DEFAULT 0,
+  last_order_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS products (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  external_id TEXT UNIQUE,
+  name TEXT NOT NULL,
+  slug TEXT UNIQUE NOT NULL,
+  description TEXT,
+  short_description TEXT,
+  category TEXT,
+  brand TEXT,
+  sku TEXT UNIQUE,
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','published','archived')),
+  supplier_id INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
+  cost_price REAL NOT NULL DEFAULT 0,
+  sale_price REAL NOT NULL DEFAULT 0,
+  stock_qty INTEGER NOT NULL DEFAULT 0,
+  weight_g REAL,
+  images_json TEXT,
+  tags_json TEXT,
+  is_trending INTEGER NOT NULL DEFAULT 0,
+  score_global REAL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_ref TEXT NOT NULL UNIQUE,
+  customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
+  supplier_id INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
+  supplier_order_id TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','confirmed','shipped','delivered','cancelled','refunded')),
+  items_json TEXT NOT NULL,
+  subtotal REAL NOT NULL DEFAULT 0,
+  shipping_cost REAL DEFAULT 0,
+  tax REAL DEFAULT 0,
+  total REAL NOT NULL DEFAULT 0,
+  cost_total REAL DEFAULT 0,
+  margin REAL DEFAULT 0,
+  margin_pct REAL DEFAULT 0,
+  payment_method TEXT,
+  payment_status TEXT DEFAULT 'pending' CHECK (payment_status IN ('pending','paid','failed','refunded')),
+  tracking_number TEXT,
+  tracking_url TEXT,
+  shipped_at TEXT,
+  delivered_at TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

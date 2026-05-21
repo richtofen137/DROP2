@@ -1,0 +1,8 @@
+node_modules/
+.env
+db/*.sqlite
+logs/*.log
+*.log
+.DS_Store
+config/google-service-account.json
+public/sitemap.xml

@@ -1,0 +1,7 @@
+{
+  "priority_chain": ["cjdropshipping", "aliexpress", "autods", "zendrop"],
+  "reliability_min": 70,
+  "max_delivery_days": 20,
+  "auto_switch_on_oos": true,
+  "retry_attempts": 3
+}

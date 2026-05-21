@@ -1,0 +1,16 @@
+{
+  "mistral": {
+    "model": "mistral-large-latest",
+    "temperature": 0.7,
+    "max_tokens": 1500
+  },
+  "description_min_length": 300,
+  "description_max_length": 800,
+  "meta_title_max": 60,
+  "meta_description_max": 160,
+  "languages": ["fr", "en"],
+  "sitemap_default_priority": 0.8,
+  "sitemap_changefreq": "weekly",
+  "image_width": 1024,
+  "image_height": 1024
+}

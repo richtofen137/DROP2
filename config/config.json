@@ -1,0 +1,25 @@
+{
+  "app": {
+    "name": "autonomous-drop",
+    "version": "1.0.0",
+    "timezone": "Europe/Paris"
+  },
+  "features": {
+    "market_analysis": true,
+    "seo_auto_generate": true,
+    "pricing_dynamic": true,
+    "supplier_auto_select": true,
+    "customer_service_ai": true,
+    "analytics_auto_report": true
+  },
+  "timeouts": {
+    "api_request_ms": 30000,
+    "scraping_ms": 60000,
+    "mistral_ms": 45000
+  },
+  "limits": {
+    "max_products_per_analysis": 100,
+    "max_concurrent_api_calls": 5,
+    "mistral_delay_ms": 500
+  }
+}

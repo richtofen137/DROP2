@@ -1,0 +1,8 @@
+{
+  "default_coefficient": 2.5,
+  "min_margin_pct": 30,
+  "trending_boost_pct": 15,
+  "stagnant_promo_pct": 20,
+  "stagnant_days": 30,
+  "floor_margin_pct": 10
+}

@@ -1,0 +1,59 @@
+{
+  "name": "autonomous-drop",
+  "version": "1.0.0",
+  "description": "Plateforme dropshipping 100% autonome — Node.js + SQLite + Mistral AI",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js",
+    "migrate": "node -e \"require('./config/database').runMigrations()\"",
+    "seed": "node -e \"require('./config/database').runSeed()\""
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "@mistralai/mistralai": "^1.8.2",
+    "@sendgrid/mail": "^8.1.4",
+    "apify-client": "^2.11.1",
+    "axios": "^1.8.4",
+    "axios-retry": "^4.5.0",
+    "better-sqlite3": "^11.9.1",
+    "cheerio": "^1.0.0",
+    "compromise": "^14.14.3",
+    "dayjs": "^1.11.13",
+    "decimal.js": "^10.5.0",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "express-async-errors": "^3.1.1",
+    "express-rate-limit": "^7.5.0",
+    "google-trends-api": "^4.9.2",
+    "html-entities": "^2.5.2",
+    "imap-simple": "^5.1.0",
+    "json2csv": "^6.1.3",
+    "jsonwebtoken": "^9.0.2",
+    "mailparser": "^3.7.4",
+    "morgan": "^1.10.0",
+    "natural": "^8.0.1",
+    "node-cache": "^5.1.2",
+    "node-cron": "^3.0.3",
+    "node-fetch": "^3.3.2",
+    "nodemailer": "^6.10.1",
+    "p-limit": "^6.2.0",
+    "p-queue": "^8.1.0",
+    "puppeteer": "^22.15.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "sanitize-html": "^2.15.0",
+    "sharp": "^0.33.5",
+    "simple-statistics": "^7.8.8",
+    "slugify": "^1.6.6",
+    "uuid": "^11.1.0",
+    "winston": "^3.17.0",
+    "xmlbuilder2": "^3.1.1",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "thresholds": {
+    "viral_min": 60,
+    "demand_min": 50,
+    "competition_max": 70,
+    "global_min": 55
+  },
+  "weights": {
+    "viral": 0.4,
+    "demand": 0.4,
+    "competition": 0.2
+  }
+}

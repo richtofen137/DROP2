@@ -1,0 +1,12 @@
+{
+  "pricing": {
+    "below_floor_alert": true,
+    "price_war_threshold_pct": 15,
+    "email_alerts": true
+  },
+  "analytics": {
+    "margin_critical_pct": 10,
+    "revenue_drop_pct": 30,
+    "auto_adjust": true
+  }
+}
